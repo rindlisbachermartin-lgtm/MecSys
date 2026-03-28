@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MecSys — Gestión de Taller</title>
+    <link rel="stylesheet" href="css/styles.css" />
+    <!-- Supabase SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<!-- ===== SIDEBAR ===== -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+        <span class="logo-icon">⚙</span>
+        <span class="logo-text">MecSys</span>
+    </div>
+    <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-page="dashboard">
+            <span class="nav-icon">▦</span>
+            <span>Dashboard</span>
+        </a>
+        <a href="#" class="nav-item" data-page="turnos">
+            <span class="nav-icon">◷</span>
+            <span>Turnos</span>
+        </a>
+        <a href="#" class="nav-item" data-page="presupuestos">
+            <span class="nav-icon">◻</span>
+            <span>Presupuestos</span>
+        </a>
+        <a href="#" class="nav-item" data-page="clientes">
+            <span class="nav-icon">◉</span>
+            <span>Clientes</span>
+        </a>
+        <a href="#" class="nav-item" data-page="repuestos">
+            <span class="nav-icon">⬡</span>
+            <span>Repuestos</span>
+        </a>
+    </nav>
+</aside>
+
+<!-- ===== TOPBAR ===== -->
+<div class="topbar">
+    <button class="menu-toggle" id="menuToggle">☰</button>
+    <h1 class="page-title" id="pageTitle">Dashboard</h1>
+    <div class="topbar-actions" id="topbarActions"></div>
+    <div class="topbar-user" id="topbarUser"></div>
+</div>
+
+<!-- ===== MAIN CONTENT ===== -->
+<main class="main-content" id="mainContent">
+    <!-- Las páginas se renderizan aquí dinámicamente -->
+</main>
+
+<!-- ===== MODAL ===== -->
+<div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modal">
+        <div class="modal-header">
+            <h2 class="modal-title" id="modalTitle"></h2>
+            <button class="modal-close" id="modalClose">✕</button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+    </div>
+</div>
+
+<!-- ===== TOAST ===== -->
+<div class="toast" id="toast"></div>
+
+<!-- ===== AUTH OVERLAY ===== -->
+<div class="auth-overlay" id="authOverlay">
+    <div class="auth-card">
+        <div class="auth-logo">
+            <span class="logo-icon" style="font-size:2rem">⚙</span>
+            <span class="logo-text" style="font-size:1.6rem">MecSys</span>
+        </div>
+        <p class="auth-subtitle">Gestión de Taller Mecánico</p>
+
+        <div class="auth-tabs">
+            <button class="auth-tab active" data-tab="login">Iniciar sesión</button>
+            <button class="auth-tab" data-tab="register">Registrarse</button>
+        </div>
+
+        <!-- Login -->
+        <form id="formLogin" class="auth-form">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="loginEmail" placeholder="usuario@email.com" required autocomplete="email">
+            </div>
+            <div class="form-group">
+                <label>Contraseña</label>
+                <input type="password" id="loginPassword" placeholder="••••••••" required autocomplete="current-password">
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:11px">
+                Entrar
+            </button>
+            <p id="loginError" class="auth-error"></p>
+        </form>
+
+        <!-- Register -->
+        <form id="formRegister" class="auth-form" style="display:none">
+            <div class="form-group">
+                <label>Nombre</label>
+                <input type="text" id="regNombre" placeholder="Tu nombre" required>
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="regEmail" placeholder="usuario@email.com" required autocomplete="email">
+            </div>
+            <div class="form-group">
+                <label>Contraseña</label>
+                <input type="password" id="regPassword" placeholder="Mínimo 6 caracteres" required minlength="6">
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:11px">
+                Crear cuenta
+            </button>
+            <p id="regError" class="auth-error"></p>
+        </form>
+    </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
