@@ -11,6 +11,11 @@ import {
 
 const ESTADOS = ['pendiente', 'en_proceso', 'finalizado', 'cancelado'];
 
+function toLocalDatetime(d) {
+    const offset = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - offset).toISOString().slice(0, 16);
+}
+
 export async function renderTurnos() {
     setPageTitle('Turnos');
     setTopbarActions(`<button class="btn btn-primary" id="btnNuevoTurno">+ Nuevo turno</button>`);
@@ -46,7 +51,7 @@ async function loadTurnos(filtroEstado = '', search = '') {
     if (search) {
         const s = search.toLowerCase();
         turnos = turnos.filter(t =>
-            t.clientes?.nombre?.toLowerCase().includes(s) ||
+            [t.clientes?.apellido, t.clientes?.nombre].filter(Boolean).join(' ').toLowerCase().includes(s) ||
             t.vehiculos?.patente?.toLowerCase().includes(s)
         );
     }
@@ -59,7 +64,7 @@ async function loadTurnos(filtroEstado = '', search = '') {
         ? turnos.map(t => `
             <tr>
                 <td style="white-space:nowrap">${fmtDate(t.fecha_hora)}</td>
-                <td>${t.clientes?.nombre || '—'}</td>
+                <td>${[t.clientes?.apellido, t.clientes?.nombre].filter(Boolean).join(', ') || '—'}</td>
                 <td>
                     <strong>${t.vehiculos?.patente || '—'}</strong><br>
                     <small style="color:var(--text-muted)">${t.vehiculos?.marca || ''} ${t.vehiculos?.modelo || ''}</small>
@@ -164,7 +169,7 @@ async function viewTurno(id) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
             <div>
                 <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:4px">CLIENTE</div>
-                <div style="font-weight:600">${t.clientes?.nombre}</div>
+                <div style="font-weight:600">${[t.clientes?.apellido, t.clientes?.nombre].filter(Boolean).join(', ') || '—'}</div>
                 <div style="font-size:.85rem;color:var(--text-muted)">${t.clientes?.telefono || ''}</div>
             </div>
             <div>
@@ -233,7 +238,7 @@ async function openFormTurno(id = null) {
     openModal(id ? 'Editar turno' : 'Nuevo turno', spinner(), '700px');
 
     const [{ data: clientes }, { data: repuestosDB }] = await Promise.all([
-        supabase.from('clientes').select('id, nombre, telefono').order('nombre'),
+        supabase.from('clientes').select('id, nombre, apellido, telefono').order('apellido').order('nombre'),
         supabase.from('repuestos')
             .select('id, nombre, codigo, precio_unitario, marca_compatible, modelo_compatible, anio_desde, anio_hasta')
             .order('nombre')
@@ -260,10 +265,10 @@ async function openFormTurno(id = null) {
     }
 
     const localISO = turno.fecha_hora
-        ? new Date(turno.fecha_hora).toISOString().slice(0,16) : '';
+        ? toLocalDatetime(new Date(turno.fecha_hora)) : '';
 
     const clienteOpts = (clientes||[]).map(c =>
-        `<option value="${c.id}" ${turno.cliente_id===c.id?'selected':''}>${c.nombre}</option>`
+        `<option value="${c.id}" ${turno.cliente_id===c.id?'selected':''}>${[c.apellido, c.nombre].filter(Boolean).join(', ')}</option>`
     ).join('');
 
     const vehiculoOpts = vehiculos.map(v =>
@@ -454,7 +459,7 @@ function renderTurnoForm({ id, clientes, repuestosDB, vehiculos, vehiculoActual,
 
         const { data: ocupados } = await supabase
             .from('turnos')
-            .select('fecha_hora, clientes(nombre), vehiculos(patente)')
+            .select('fecha_hora, clientes(nombre, apellido), vehiculos(patente)')
             .gte('fecha_hora', dayStart.toISOString())
             .lte('fecha_hora', dayEnd.toISOString())
             .neq('estado', 'cancelado')
@@ -469,7 +474,7 @@ function renderTurnoForm({ id, clientes, repuestosDB, vehiculos, vehiculoActual,
             const lista = filtrados.map(t =>
                 `<span class="horario-chip">
                     ${new Date(t.fecha_hora).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}
-                    ${t.clientes?.nombre?.split(' ')[0] || ''}
+                    ${t.clientes?.apellido || t.clientes?.nombre || ''}
                  </span>`
             ).join('');
             hint.innerHTML = `<div class="horarios-hint warn">
@@ -497,7 +502,7 @@ async function submitTurno(e, id, items) {
     const payload = {
         cliente_id:  fd.get('cliente_id'),
         vehiculo_id: fd.get('vehiculo_id'),
-        fecha_hora:  fd.get('fecha_hora'),
+        fecha_hora:  new Date(fd.get('fecha_hora')).toISOString(),
         estado:      fd.get('estado'),
         tareas:      fd.get('tareas').trim() || null,
         notas:       fd.get('notas').trim()  || null,
@@ -538,7 +543,7 @@ async function submitTurno(e, id, items) {
 async function offerWhatsApp(turnoId) {
     const { data: t } = await supabase
         .from('turnos')
-        .select('id, clientes(nombre, telefono), vehiculos(patente, marca, modelo)')
+        .select('id, clientes(nombre, apellido, telefono), vehiculos(patente, marca, modelo)')
         .eq('id', turnoId)
         .single();
 
@@ -548,7 +553,7 @@ async function offerWhatsApp(turnoId) {
     }
 
     const phone   = formatWAPhone(t.clientes.telefono);
-    const nombre  = t.clientes.nombre;
+    const nombre  = [t.clientes.apellido, t.clientes.nombre].filter(Boolean).join(', ');
     const patente = t.vehiculos?.patente || '';
     const vehiculo = `${t.vehiculos?.marca || ''} ${t.vehiculos?.modelo || ''}`.trim();
 

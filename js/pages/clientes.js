@@ -5,8 +5,19 @@ import { supabase } from '../supabase.js';
 import {
     renderMain, setPageTitle, setTopbarActions,
     openModal, closeModal, showToast, spinner, emptyState, fmtDateShort,
-    applyPhoneMask
+    applyPhoneMask, applyDniMask
 } from '../ui.js';
+
+function fmtDni(d) {
+    const s = String(d).replace(/\D/g, '');
+    if (s.length <= 2) return s;
+    if (s.length <= 5) return s.slice(0,2) + '.' + s.slice(2);
+    return s.slice(0,2) + '.' + s.slice(2,5) + '.' + s.slice(5);
+}
+
+function fmtNombre(c) {
+    return [c.apellido, c.nombre].filter(Boolean).join(', ');
+}
 
 export async function renderClientes() {
     setPageTitle('Clientes');
@@ -23,10 +34,10 @@ export async function renderClientes() {
 async function loadClientes(search = '') {
     let query = supabase
         .from('clientes')
-        .select('id, nombre, telefono, email, created_at')
-        .order('nombre');
+        .select('id, nombre, apellido, dni, telefono, email, created_at')
+        .order('apellido').order('nombre');
 
-    if (search) query = query.ilike('nombre', `%${search}%`);
+    if (search) query = query.or(`nombre.ilike.%${search}%,apellido.ilike.%${search}%,dni.ilike.%${search}%`);
 
     const { data, error } = await query;
 
@@ -46,30 +57,31 @@ async function loadClientes(search = '') {
     const rows = data.length
         ? data.map(c => `
             <tr>
-                <td>${c.nombre}</td>
+                <td>${fmtNombre(c)}</td>
+                <td>${c.dni ? `<span class="dni-badge">${fmtDni(c.dni)}</span>` : '<span style="color:var(--text-muted)">—</span>'}</td>
                 <td>${c.telefono || '—'}</td>
                 <td>${c.email || '—'}</td>
                 <td>
-                    <button class="btn btn-ghost btn-sm" data-action="autos" data-id="${c.id}" data-nombre="${c.nombre}">
+                    <button class="btn btn-ghost btn-sm" data-action="autos" data-id="${c.id}" data-nombre="${fmtNombre(c)}">
                         🚗 ${vcMap[c.id] || 0} vehículo${(vcMap[c.id] || 0) !== 1 ? 's' : ''}
                     </button>
                 </td>
                 <td>${fmtDateShort(c.created_at)}</td>
                 <td>
                     <button class="btn btn-ghost btn-sm" data-action="edit" data-id="${c.id}">Editar</button>
-                    <button class="btn btn-danger btn-sm" data-action="delete" data-id="${c.id}" data-nombre="${c.nombre}">Eliminar</button>
+                    <button class="btn btn-danger btn-sm" data-action="delete" data-id="${c.id}" data-nombre="${fmtNombre(c)}">Eliminar</button>
                 </td>
             </tr>`).join('')
-        : `<tr><td colspan="6">${emptyState('No hay clientes registrados')}</td></tr>`;
+        : `<tr><td colspan="7">${emptyState('No hay clientes registrados')}</td></tr>`;
 
     renderMain(`
         <div class="filters">
-            <input type="search" id="searchCliente" placeholder="Buscar por nombre…" value="${search}">
+            <input type="search" id="searchCliente" placeholder="Buscar por nombre o DNI…" value="${search}">
         </div>
         <div class="table-wrapper">
             <table>
                 <thead><tr>
-                    <th>Nombre</th><th>Teléfono</th><th>Email</th>
+                    <th>Nombre</th><th>DNI</th><th>Teléfono</th><th>Email</th>
                     <th>Vehículos</th><th>Registrado</th><th>Acciones</th>
                 </tr></thead>
                 <tbody>${rows}</tbody>
@@ -110,9 +122,18 @@ function renderForm(id, c) {
     document.getElementById('modalBody').innerHTML = `
         <form id="formCliente">
             <div class="form-grid">
-                <div class="form-group full">
-                    <label>Nombre completo *</label>
-                    <input type="text" name="nombre" value="${c.nombre || ''}" required>
+                <div class="form-group">
+                    <label>Nombre *</label>
+                    <input type="text" name="nombre" value="${c.nombre || ''}" required placeholder="Ej: Juan">
+                </div>
+                <div class="form-group">
+                    <label>Apellido *</label>
+                    <input type="text" name="apellido" value="${c.apellido || ''}" required placeholder="Ej: García">
+                </div>
+                <div class="form-group">
+                    <label>DNI</label>
+                    <input type="text" name="dni" value="${c.dni || ''}"
+                           placeholder="Ej: 12345678" maxlength="20">
                 </div>
                 <div class="form-group">
                     <label>Teléfono</label>
@@ -122,7 +143,7 @@ function renderForm(id, c) {
                     <label>Email</label>
                     <input type="email" name="email" value="${c.email || ''}">
                 </div>
-                <div class="form-group full">
+                <div class="form-group">
                     <label>Dirección</label>
                     <input type="text" name="direccion" value="${c.direccion || ''}">
                 </div>
@@ -134,7 +155,9 @@ function renderForm(id, c) {
         </form>
     `;
 
-    // Aplicar máscara de teléfono
+    // Aplicar máscaras
+    const dniInput = document.querySelector('[name="dni"]');
+    if (dniInput) applyDniMask(dniInput);
     const telInput = document.querySelector('[name="telefono"]');
     if (telInput) applyPhoneMask(telInput);
 
@@ -147,9 +170,11 @@ async function submitCliente(e, id) {
     const fd = new FormData(e.target);
     const payload = {
         nombre:    fd.get('nombre').trim(),
-        telefono:  fd.get('telefono').trim() || null,
-        email:     fd.get('email').trim()    || null,
-        direccion: fd.get('direccion').trim()|| null,
+        apellido:  fd.get('apellido').trim() || null,
+        dni:       fd.get('dni').replace(/\D/g, '') || null,
+        telefono:  fd.get('telefono').trim()  || null,
+        email:     fd.get('email').trim()     || null,
+        direccion: fd.get('direccion').trim() || null,
     };
 
     const { error } = id
@@ -328,7 +353,45 @@ function confirmDeleteVehiculo(id, patente, clienteId, clienteNombre) {
     });
 }
 
-function confirmDelete(id, nombre) {
+async function confirmDelete(id, nombre) {
+    // Verificar si tiene turnos asignados
+    const { data: turnos } = await supabase
+        .from('turnos')
+        .select('fecha_hora')
+        .eq('cliente_id', id)
+        .order('fecha_hora');
+
+    if (turnos && turnos.length > 0) {
+        const fechas = turnos.map(t =>
+            new Date(t.fecha_hora).toLocaleDateString('es-AR', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit'
+            })
+        );
+
+        const listHTML = fechas.length === 1
+            ? `el día <strong>${fechas[0]}</strong>`
+            : `los días:<br><ul style="margin:10px 0 0 18px;line-height:1.9">
+                ${fechas.map(f => `<li><strong>${f}</strong></li>`).join('')}
+               </ul>`;
+
+        openModal('No se puede eliminar', `
+            <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:20px">
+                <span style="font-size:1.8rem;line-height:1">⚠️</span>
+                <p style="line-height:1.6">
+                    No se puede eliminar al cliente <strong>${nombre}</strong>
+                    ya que tiene un turno asignado ${listHTML}
+                </p>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary" id="cancelDel">Entendido</button>
+            </div>
+        `, '440px');
+
+        document.getElementById('cancelDel').addEventListener('click', closeModal);
+        return;
+    }
+
     openModal('Confirmar eliminación', `
         <p style="margin-bottom:20px">¿Eliminar al cliente <strong>${nombre}</strong>?<br>
         <small style="color:var(--text-muted)">Se eliminarán también sus vehículos asociados.</small></p>

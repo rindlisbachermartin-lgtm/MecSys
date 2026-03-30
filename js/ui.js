@@ -78,7 +78,39 @@ export function setTopbarActions(html) {
 
 // ----- Render en main -----
 export function renderMain(html) {
-    document.getElementById('mainContent').innerHTML = html;
+    const el = document.getElementById('mainContent');
+    el.innerHTML = html;
+    // Trigger page-enter animation
+    el.classList.remove('page-enter');
+    void el.offsetWidth; // reflow
+    el.classList.add('page-enter');
+}
+
+// ----- Máscara de DNI: 99.999.999 -----
+export function applyDniMask(input) {
+    input.setAttribute('maxlength', '10');
+    input.setAttribute('placeholder', '12.345.678');
+
+    const format = (val) => {
+        const d = val.replace(/\D/g, '').slice(0, 8);
+        if (d.length <= 2) return d;
+        if (d.length <= 5) return d.slice(0,2) + '.' + d.slice(2);
+        return d.slice(0,2) + '.' + d.slice(2,5) + '.' + d.slice(5);
+    };
+
+    input.addEventListener('input', e => {
+        const pos = e.target.selectionStart;
+        e.target.value = format(e.target.value);
+    });
+
+    input.addEventListener('paste', e => {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData('text');
+        input.value = format(text);
+    });
+
+    // Formatear valor inicial si ya tiene uno
+    if (input.value) input.value = format(input.value);
 }
 
 // ----- Máscara de teléfono: 9999-999999 -----

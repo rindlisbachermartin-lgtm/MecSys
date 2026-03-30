@@ -110,7 +110,7 @@ async function viewPresupuesto(id) {
 
     const [{ data: p }, { data: items }] = await Promise.all([
         supabase.from('presupuestos').select(`
-            *, clientes(nombre, telefono, email), vehiculos(patente, marca, modelo, anio)
+            *, clientes(nombre, apellido, telefono, email), vehiculos(patente, marca, modelo, anio)
         `).eq('id', id).single(),
         supabase.from('presupuesto_items').select(`
             descripcion, cantidad, precio_unitario, repuestos(nombre)
@@ -119,8 +119,10 @@ async function viewPresupuesto(id) {
 
     if (!p) { showToast('Error cargando presupuesto', 'error'); return; }
 
-    const totalRep = (items||[]).reduce((s, i) => s + i.cantidad * i.precio_unitario, 0);
-    const totalGen = totalRep + (p.mano_de_obra || 0);
+    const totalRep  = (items||[]).reduce((s, i) => s + i.cantidad * i.precio_unitario, 0);
+    const subtotal  = totalRep + (p.mano_de_obra || 0);
+    const ivaAmt    = p.incluye_iva ? subtotal * 0.21 : 0;
+    const totalGen  = subtotal + ivaAmt;
 
     const itemRows = (items||[]).length
         ? (items||[]).map(i => `
@@ -137,7 +139,7 @@ async function viewPresupuesto(id) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
             <div>
                 <div class="stat-label" style="margin-bottom:4px">CLIENTE</div>
-                <div style="font-weight:600">${p.clientes?.nombre}</div>
+                <div style="font-weight:600">${[p.clientes?.apellido, p.clientes?.nombre].filter(Boolean).join(', ') || '—'}</div>
                 <div style="font-size:.85rem;color:var(--text-muted)">${p.clientes?.telefono||''} ${p.clientes?.email?'· '+p.clientes.email:''}</div>
             </div>
             <div>
@@ -174,8 +176,13 @@ async function viewPresupuesto(id) {
                 <span>Mano de obra</span>
                 <span>${fmtMoney(p.mano_de_obra)}</span>
             </div>
+            ${p.incluye_iva ? `
+            <div class="total-row">
+                <span>IVA (21%)</span>
+                <span>${fmtMoney(ivaAmt)}</span>
+            </div>` : ''}
             <div class="total-row grand">
-                <span>TOTAL</span>
+                <span>TOTAL${p.incluye_iva ? ' c/IVA' : ''}</span>
                 <span>${fmtMoney(totalGen)}</span>
             </div>
         </div>
@@ -184,11 +191,14 @@ async function viewPresupuesto(id) {
 
         <div class="form-actions" style="margin-top:16px">
             <button class="btn btn-ghost" id="closeDet">Cerrar</button>
+            <button class="btn btn-ghost" id="btnExportImg">📷 Guardar imagen</button>
             <button class="btn btn-primary" data-action="edit" data-id="${p.id}">Editar</button>
         </div>
     `;
 
     document.getElementById('closeDet').addEventListener('click', closeModal);
+    document.getElementById('btnExportImg').addEventListener('click', () =>
+        exportarImagenPresupuesto(p, items || []));
     document.querySelector('[data-action="edit"]')
         ?.addEventListener('click', () => { closeModal(); openFormPresupuesto(id); });
 }
@@ -198,7 +208,7 @@ async function openFormPresupuesto(id = null) {
     openModal(id ? 'Editar presupuesto' : 'Nuevo presupuesto', spinner(), '720px');
 
     const [{ data: clientes }, { data: repuestosDB }] = await Promise.all([
-        supabase.from('clientes').select('id, nombre').order('nombre'),
+        supabase.from('clientes').select('id, nombre, apellido').order('apellido').order('nombre'),
         supabase.from('repuestos')
             .select('id, nombre, precio_unitario, marca_compatible, modelo_compatible, anio_desde, anio_hasta')
             .order('nombre')
@@ -253,7 +263,7 @@ function renderPresupuestoForm({ id, clientes, repuestosDB, vehiculos, vehiculoA
     };
 
     const clienteOpts = (clientes||[]).map(c =>
-        `<option value="${c.id}" ${pres.cliente_id===c.id?'selected':''}>${c.nombre}</option>`
+        `<option value="${c.id}" ${pres.cliente_id===c.id?'selected':''}>${[c.apellido, c.nombre].filter(Boolean).join(', ')}</option>`
     ).join('');
 
     const vehiculoOpts = vehiculos.map(v =>
@@ -264,56 +274,37 @@ function renderPresupuestoForm({ id, clientes, repuestosDB, vehiculos, vehiculoA
         `<option value="${e}" ${(pres.estado||'borrador')===e?'selected':''}>${e}</option>`
     ).join('');
 
-    const buildQuickOpts = () => {
-        const lista = getCompatibles();
-        return lista.map(r => {
-            const tag = (!r.marca_compatible && !r.modelo_compatible) ? ' · universal' : '';
-            return `<option value="${r.id}" data-precio="${r.precio_unitario}" data-nombre="${r.nombre}">
-                ${r.nombre}${tag} — ${fmtMoney(r.precio_unitario)}
-            </option>`;
-        }).join('');
-    };
-
     const renderItems = () => {
-        const container = document.getElementById('presItemsContainer');
+        const container  = document.getElementById('presItemsContainer');
         const totalRepEl = document.getElementById('totalRepuestos');
         const totalGenEl = document.getElementById('totalGeneral');
-        const hintComp   = document.getElementById('presCompatHint');
-        const quickSel   = document.getElementById('quickAddRep');
         if (!container) return;
 
-        // Actualizar selector de catálogo con repuestos filtrados
-        if (quickSel) {
-            const cur = quickSel.value;
-            quickSel.innerHTML = `<option value="">Agregar desde catálogo…</option>${buildQuickOpts()}`;
-            quickSel.value = cur;
-        }
-
-        // Hint de compatibilidad
-        if (hintComp) {
-            const total  = (repuestosDB||[]).length;
-            const compat = getCompatibles().length;
-            hintComp.textContent = currentVehiculo
-                ? `Mostrando ${compat} de ${total} repuestos compatibles con este vehículo`
-                : 'Seleccioná un vehículo para filtrar el catálogo';
-        }
-
-        const mdo = parseFloat(document.querySelector('[name="mano_de_obra"]')?.value || 0);
-        const totalRep = items.reduce((s, i) => s + (i.cantidad||0)*(i.precio_unitario||0), 0);
+        const mdo       = parseFloat(document.querySelector('[name="mano_de_obra"]')?.value || 0);
+        const conIva    = document.getElementById('chkIva')?.checked ?? false;
+        const totalRep  = items.reduce((s, i) => s + (i.cantidad||0)*(i.precio_unitario||0), 0);
+        const subtotal  = totalRep + mdo;
+        const ivaAmt    = conIva ? subtotal * 0.21 : 0;
+        const ivaRow    = document.getElementById('ivaRow');
+        const ivaValEl  = document.getElementById('ivaVal');
+        if (ivaRow)   ivaRow.style.display  = conIva ? '' : 'none';
+        if (ivaValEl) ivaValEl.textContent   = fmtMoney(ivaAmt);
         if (totalRepEl) totalRepEl.textContent = fmtMoney(totalRep);
-        if (totalGenEl) totalGenEl.textContent = fmtMoney(totalRep + mdo);
+        if (totalGenEl) totalGenEl.textContent = fmtMoney(subtotal + ivaAmt);
 
         if (!items.length) {
-            container.innerHTML = `<p style="color:var(--text-muted);font-size:.85rem;text-align:center;padding:12px 0">Sin ítems. Agregá desde el catálogo o manualmente.</p>`;
+            container.innerHTML = `<p style="color:var(--text-muted);font-size:.85rem;text-align:center;padding:16px 0">
+                Sin ítems. Buscá un repuesto o agregá uno manualmente.
+            </p>`;
             return;
         }
 
         container.innerHTML = items.map((item, i) => {
             const sub = (item.cantidad||0)*(item.precio_unitario||0);
-            return `<div class="item-row" style="grid-template-columns:1fr 80px 110px auto 36px" data-index="${i}">
-                <input type="text" class="item-desc"   data-i="${i}" placeholder="Descripción" value="${item.descripcion||''}">
-                <input type="number" class="item-cant" data-i="${i}" value="${item.cantidad||1}" min="1" step="1" placeholder="Cant.">
-                <input type="number" class="item-precio" data-i="${i}" value="${item.precio_unitario||0}" min="0" step="0.01" placeholder="Precio">
+            return `<div class="item-row" data-index="${i}">
+                <input type="text"   class="item-desc"   data-i="${i}" placeholder="Descripción" value="${item.descripcion||''}">
+                <input type="number" class="item-cant"   data-i="${i}" value="${item.cantidad||1}" min="1" step="1">
+                <input type="number" class="item-precio" data-i="${i}" value="${item.precio_unitario||0}" min="0" step="0.01">
                 <div class="item-subtotal">${fmtMoney(sub)}</div>
                 <button type="button" class="btn btn-danger btn-icon item-del" data-i="${i}">✕</button>
             </div>`;
@@ -327,6 +318,45 @@ function renderPresupuestoForm({ id, clientes, repuestosDB, vehiculos, vehiculoA
             inp.addEventListener('input', () => { items[+inp.dataset.i].precio_unitario = parseFloat(inp.value)||0; renderItems(); }));
         container.querySelectorAll('.item-del').forEach(btn =>
             btn.addEventListener('click', () => { items.splice(+btn.dataset.i, 1); renderItems(); }));
+    };
+
+    const showRepResults = (query) => {
+        const box = document.getElementById('repResults');
+        if (!box) return;
+        const q = query.trim().toLowerCase();
+        const lista = getCompatibles().filter(r =>
+            !q ||
+            r.nombre.toLowerCase().includes(q) ||
+            (r.codigo || '').toLowerCase().includes(q)
+        );
+        if (!lista.length) { box.style.display = 'none'; return; }
+        box.style.display = 'block';
+        box.innerHTML = lista.map(r => {
+            const universal = (!r.marca_compatible && !r.modelo_compatible);
+            return `<div class="rep-result-item" data-id="${r.id}"
+                        data-nombre="${r.nombre}" data-precio="${r.precio_unitario||0}">
+                <span class="rep-result-nombre">${r.nombre}${r.codigo ? ` <small>(${r.codigo})</small>` : ''}</span>
+                <span class="rep-result-right">
+                    ${universal ? `<span class="rep-universal-tag">universal</span>` : ''}
+                    <span class="rep-result-precio">${fmtMoney(r.precio_unitario)}</span>
+                </span>
+            </div>`;
+        }).join('');
+
+        box.querySelectorAll('.rep-result-item').forEach(el => {
+            el.addEventListener('mousedown', e => {
+                e.preventDefault();
+                items.push({
+                    repuesto_id:    el.dataset.id,
+                    descripcion:    el.dataset.nombre,
+                    cantidad:       1,
+                    precio_unitario: parseFloat(el.dataset.precio) || 0
+                });
+                document.getElementById('repSearch').value = '';
+                box.style.display = 'none';
+                renderItems();
+            });
+        });
     };
 
     document.getElementById('modalBody').innerHTML = `
@@ -362,28 +392,55 @@ function renderPresupuestoForm({ id, clientes, repuestosDB, vehiculos, vehiculoA
 
             <!-- Ítems -->
             <div style="margin-top:18px">
-                <div class="section-header" style="margin-bottom:4px">
+                <div class="section-header" style="margin-bottom:10px">
                     <span style="font-size:.85rem;font-weight:600;color:var(--text-muted)">ÍTEMS</span>
-                    <div style="display:flex;gap:8px">
-                        <select id="quickAddRep" style="width:auto;font-size:.8rem;padding:5px 10px">
-                            <option value="">Agregar desde catálogo…</option>
-                        </select>
-                        <button type="button" class="btn btn-ghost btn-sm" id="btnAddItemManual">+ Manual</button>
-                    </div>
+                    <button type="button" class="btn btn-ghost btn-sm" id="btnAddItemManual">+ Manual</button>
                 </div>
-                <p id="presCompatHint" style="font-size:.75rem;color:var(--text-muted);margin-bottom:8px"></p>
+
+                <!-- Buscador de repuestos -->
+                <div style="position:relative;margin-bottom:12px">
+                    <input type="text" id="repSearch"
+                           placeholder="Buscar repuesto compatible…"
+                           style="width:100%;padding-left:34px">
+                    <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);
+                                 color:var(--text-muted);pointer-events:none;font-size:.95rem">🔍</span>
+                    <div id="repResults" class="rep-results-dropdown" style="display:none"></div>
+                </div>
+
+                <!-- Cabecera de columnas -->
+                <div class="item-row item-row-header">
+                    <span>Descripción</span>
+                    <span style="text-align:center">Cant.</span>
+                    <span style="text-align:right">Precio u.</span>
+                    <span style="text-align:right">Subtotal</span>
+                    <span></span>
+                </div>
+
                 <div id="presItemsContainer"></div>
             </div>
 
             <!-- Mano de obra + totales -->
             <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">
-                <div class="form-group">
-                    <label>Mano de obra ($)</label>
-                    <input type="number" name="mano_de_obra" id="mdoInput" value="${pres.mano_de_obra||0}" min="0" step="0.01">
+                <div style="display:flex;flex-direction:column;gap:12px">
+                    <div class="form-group">
+                        <label>Mano de obra ($)</label>
+                        <input type="number" name="mano_de_obra" id="mdoInput" value="${pres.mano_de_obra||0}" min="0" step="0.01">
+                    </div>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
+                                  font-size:.875rem;font-weight:500;color:var(--text);
+                                  text-transform:none;letter-spacing:0">
+                        <input type="checkbox" id="chkIva" name="incluye_iva"
+                               ${pres.incluye_iva ? 'checked' : ''}
+                               style="width:16px;height:16px;accent-color:var(--accent);flex-shrink:0">
+                        Aplicar IVA (21%)
+                    </label>
                 </div>
-                <div class="total-box" style="margin-top:22px">
+                <div class="total-box" style="margin-top:0">
                     <div class="total-row"><span>Repuestos</span><span id="totalRepuestos">${fmtMoney(0)}</span></div>
                     <div class="total-row"><span>Mano de obra</span><span>${fmtMoney(pres.mano_de_obra||0)}</span></div>
+                    <div class="total-row" id="ivaRow" style="display:none">
+                        <span>IVA (21%)</span><span id="ivaVal">${fmtMoney(0)}</span>
+                    </div>
                     <div class="total-row grand"><span>TOTAL</span><span id="totalGeneral">${fmtMoney(pres.mano_de_obra||0)}</span></div>
                 </div>
             </div>
@@ -420,19 +477,12 @@ function renderPresupuestoForm({ id, clientes, repuestosDB, vehiculos, vehiculoA
         renderItems();
     });
 
-    // Quick add desde catálogo filtrado
-    document.getElementById('quickAddRep')?.addEventListener('change', e => {
-        const opt = e.target.selectedOptions[0];
-        if (!opt.value) return;
-        items.push({
-            repuesto_id: opt.value,
-            descripcion: opt.dataset.nombre,
-            cantidad: 1,
-            precio_unitario: parseFloat(opt.dataset.precio) || 0
-        });
-        e.target.value = '';
-        renderItems();
-    });
+    // Buscador de repuestos
+    const repSearch = document.getElementById('repSearch');
+    const repResults = document.getElementById('repResults');
+    repSearch?.addEventListener('input',  e => showRepResults(e.target.value));
+    repSearch?.addEventListener('focus',  e => showRepResults(e.target.value));
+    repSearch?.addEventListener('blur',   ()  => setTimeout(() => { if (repResults) repResults.style.display = 'none'; }, 150));
 
     document.getElementById('btnAddItemManual')?.addEventListener('click', () => {
         items.push({ repuesto_id: null, descripcion: '', cantidad: 1, precio_unitario: 0 });
@@ -440,6 +490,7 @@ function renderPresupuestoForm({ id, clientes, repuestosDB, vehiculos, vehiculoA
     });
 
     document.getElementById('mdoInput')?.addEventListener('input', renderItems);
+    document.getElementById('chkIva')?.addEventListener('change', renderItems);
     document.getElementById('cancelForm').addEventListener('click', closeModal);
     document.getElementById('formPresupuesto').addEventListener('submit', e => submitPresupuesto(e, id, items));
 }
@@ -452,6 +503,7 @@ async function submitPresupuesto(e, id, items) {
         cliente_id:   fd.get('cliente_id'),
         vehiculo_id:  fd.get('vehiculo_id'),
         mano_de_obra: parseFloat(fd.get('mano_de_obra')) || 0,
+        incluye_iva:  fd.get('incluye_iva') === 'on',
         estado:       fd.get('estado'),
         validez_dias: parseInt(fd.get('validez_dias'), 10) || 15,
         notas:        fd.get('notas').trim() || null,
@@ -487,6 +539,207 @@ async function submitPresupuesto(e, id, items) {
     showToast(id ? 'Presupuesto actualizado' : 'Presupuesto creado', 'success');
     closeModal();
     loadPresupuestos();
+}
+
+// ============================================================
+// EXPORTAR IMAGEN B&N
+// ============================================================
+async function exportarImagenPresupuesto(p, items) {
+    const btn = document.getElementById('btnExportImg');
+    btn.textContent = 'Generando…';
+    btn.disabled = true;
+
+    const tallerNombre    = localStorage.getItem('taller_nombre')    || 'Mi Taller';
+    const tallerLogo      = localStorage.getItem('taller_logo')      || '';
+    const tallerDireccion = localStorage.getItem('taller_direccion') || '';
+
+    const totalRep = items.reduce((s, i) => s + i.cantidad * i.precio_unitario, 0);
+    const mdo       = p.mano_de_obra || 0;
+    const subtotal  = totalRep + mdo;
+    const ivaAmt    = p.incluye_iva ? subtotal * 0.21 : 0;
+    const totalGen  = subtotal + ivaAmt;
+
+    const fechaStr = new Date(p.created_at).toLocaleDateString('es-AR', {
+        day: '2-digit', month: '2-digit', year: 'numeric'
+    });
+    const vencStr = (() => {
+        const d = new Date(p.created_at);
+        d.setDate(d.getDate() + (p.validez_dias || 15));
+        return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    })();
+
+    // Colores base — todo texto oscuro sobre blanco
+    const C = { title: '#000', body: '#1a1a1a', sub: '#333', label: '#444', muted: '#555', border: '#bbb', bg2: '#f4f4f4' };
+
+    const repRows = items.map((it, idx) => `
+        <tr class="${idx % 2 !== 0 ? 'pq-row-alt' : ''}">
+            <td style="padding:8px 10px;border-bottom:1px solid ${C.border}">${it.descripcion}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid ${C.border};text-align:center">${it.cantidad}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid ${C.border};text-align:right">${fmtMoney(it.precio_unitario)}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid ${C.border};text-align:right;font-weight:700">${fmtMoney(it.cantidad * it.precio_unitario)}</td>
+        </tr>`).join('');
+
+    const mdoIdx = items.length;
+    const mdoRow = mdo > 0 ? `
+        <tr class="${mdoIdx % 2 !== 0 ? 'pq-row-alt' : ''}">
+            <td style="padding:8px 10px;border-bottom:1px solid ${C.border};font-style:italic">Mano de obra</td>
+            <td style="padding:8px 10px;border-bottom:1px solid ${C.border};text-align:center">1</td>
+            <td style="padding:8px 10px;border-bottom:1px solid ${C.border};text-align:right">${fmtMoney(mdo)}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid ${C.border};text-align:right;font-weight:700">${fmtMoney(mdo)}</td>
+        </tr>` : '';
+
+    const itemsHTML = (repRows || mdoRow)
+        ? repRows + mdoRow
+        : `<tr><td colspan="4" style="padding:12px;text-align:center;font-style:italic">Sin ítems</td></tr>`;
+
+    const logoSrc  = tallerLogo || 'img/default-taller.svg';
+    const logoHTML = `<img src="${logoSrc}" style="height:54px;width:54px;object-fit:cover;border-radius:6px;border:1px solid ${C.border}">`;
+
+    const ivaRowHTML = p.incluye_iva ? `
+        <div style="display:flex;justify-content:space-between;padding:8px 14px;border-bottom:1px solid ${C.border}">
+            <span style="color:${C.sub}">IVA (21%)</span>
+            <span style="font-weight:600;color:${C.body}">${fmtMoney(ivaAmt)}</span>
+        </div>` : '';
+
+    const html = `
+    <div id="pq-root" style="
+        width: 680px;
+        background: #fff;
+        color: #1a1a1a;
+        font-family: 'Segoe UI', Arial, sans-serif;
+        font-size: 13px;
+        padding: 40px;
+        box-sizing: border-box;
+    ">
+        <!-- CABECERA -->
+        <div style="display:flex;justify-content:space-between;align-items:center;
+                    border-bottom:2px solid ${C.title};padding-bottom:20px;margin-bottom:24px">
+            <div style="display:flex;align-items:center;gap:14px">
+                ${logoHTML}
+                <div>
+                    <div style="font-size:1.3rem;font-weight:800;letter-spacing:1px;color:${C.title}">${tallerNombre}</div>
+                    <div style="font-size:.75rem;color:${C.label};margin-top:2px;text-transform:uppercase;letter-spacing:.5px">Taller Mecánico</div>
+                    ${tallerDireccion ? `<div style="font-size:.75rem;color:${C.sub};margin-top:2px">${tallerDireccion}</div>` : ''}
+                </div>
+            </div>
+            <div style="text-align:right">
+                <div style="font-size:1.1rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:${C.title}">Presupuesto</div>
+                <div style="font-size:.8rem;color:${C.sub};margin-top:4px">Fecha: ${fechaStr}</div>
+                <div style="font-size:.8rem;color:${C.sub}">Válido hasta: ${vencStr}</div>
+            </div>
+        </div>
+
+        <!-- CLIENTE Y VEHÍCULO -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+            <div style="border:1px solid ${C.border};border-radius:6px;padding:14px">
+                <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:.8px;color:${C.label};margin-bottom:8px">Cliente</div>
+                <div style="font-size:1rem;font-weight:700;color:${C.title}">${[p.clientes?.apellido, p.clientes?.nombre].filter(Boolean).join(', ') || '—'}</div>
+                ${p.clientes?.telefono ? `<div style="font-size:.82rem;color:${C.sub};margin-top:3px">Tel: ${p.clientes.telefono}</div>` : ''}
+                ${p.clientes?.email    ? `<div style="font-size:.82rem;color:${C.sub}">Email: ${p.clientes.email}</div>` : ''}
+            </div>
+            <div style="border:1px solid ${C.border};border-radius:6px;padding:14px">
+                <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:.8px;color:${C.label};margin-bottom:8px">Vehículo</div>
+                <div style="font-size:1rem;font-weight:700;color:${C.title}">${p.vehiculos?.patente || '—'}</div>
+                <div style="font-size:.82rem;color:${C.sub};margin-top:3px">
+                    ${p.vehiculos?.marca || ''} ${p.vehiculos?.modelo || ''} ${p.vehiculos?.anio ? '('+p.vehiculos.anio+')' : ''}
+                </div>
+            </div>
+        </div>
+
+        <!-- ÍTEMS -->
+        <div style="margin-bottom:20px">
+            <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;
+                        letter-spacing:.8px;color:${C.label};margin-bottom:8px">Detalle de trabajos y repuestos</div>
+            <table style="width:100%;border-collapse:collapse;font-size:.85rem">
+                <thead>
+                    <tr class="pq-thead-row">
+                        <th style="padding:9px 10px;text-align:left;font-weight:600">Descripción</th>
+                        <th style="padding:9px 10px;text-align:center;font-weight:600;width:60px">Cant.</th>
+                        <th style="padding:9px 10px;text-align:right;font-weight:600;width:110px">Precio u.</th>
+                        <th style="padding:9px 10px;text-align:right;font-weight:600;width:110px">Subtotal</th>
+                    </tr>
+                </thead>
+                <tbody>${itemsHTML}</tbody>
+            </table>
+        </div>
+
+        <!-- TOTALES -->
+        <div style="display:flex;justify-content:flex-end;margin-bottom:20px">
+            <div style="width:280px;border:1px solid ${C.border};border-radius:6px;overflow:hidden">
+                <div style="display:flex;justify-content:space-between;padding:8px 14px;border-bottom:1px solid ${C.border}">
+                    <span style="color:${C.sub}">Subtotal</span>
+                    <span style="font-weight:600;color:${C.body}">${fmtMoney(subtotal)}</span>
+                </div>
+                ${ivaRowHTML}
+                <div class="pq-total-grand" style="display:flex;justify-content:space-between;padding:11px 14px">
+                    <span style="font-weight:700;font-size:1rem">TOTAL${p.incluye_iva ? ' c/IVA' : ''}</span>
+                    <span style="font-weight:800;font-size:1rem">${fmtMoney(totalGen)}</span>
+                </div>
+            </div>
+        </div>
+
+        ${p.notas ? `
+        <!-- NOTAS -->
+        <div style="border:1px solid ${C.border};border-radius:6px;padding:12px 14px;margin-bottom:20px">
+            <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;
+                        letter-spacing:.8px;color:${C.label};margin-bottom:6px">Notas</div>
+            <div style="font-size:.85rem;color:${C.body}">${p.notas}</div>
+        </div>` : ''}
+
+        <!-- PIE -->
+        <div style="border-top:1px solid ${C.border};padding-top:14px;
+                    display:flex;justify-content:space-between;align-items:center">
+            <div style="font-size:.72rem;color:${C.label}">
+                Válido por ${p.validez_dias || 15} días desde la fecha de emisión.
+            </div>
+            <div style="font-size:.7rem;color:${C.muted};font-style:italic">Generado con MecSys</div>
+        </div>
+    </div>`;
+
+    // Renderizar en iframe aislado para evitar herencia del CSS del tema oscuro
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:780px;height:1400px;border:none;z-index:-1';
+    document.body.appendChild(iframe);
+
+    const iDoc = iframe.contentDocument;
+    iDoc.open();
+    iDoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { background:#fff; color:#1a1a1a; font-family:'Segoe UI',Arial,sans-serif; }
+        .pq-thead-row th { background:#000 !important; color:#fff !important; }
+        .pq-row-alt { background:#f4f4f4 !important; }
+        .pq-total-grand { background:#000 !important; }
+        .pq-total-grand span { color:#fff !important; }
+    </style></head><body>${html}</body></html>`);
+    iDoc.close();
+
+    // Esperar a que se pinte el iframe
+    await new Promise(r => setTimeout(r, 150));
+
+    try {
+        const canvas = await window.html2canvas(iDoc.querySelector('#pq-root'), {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            logging: false,
+        });
+
+        const link = document.createElement('a');
+        const clienteSlug = ([p.clientes?.apellido, p.clientes?.nombre].filter(Boolean).join('_') || 'cliente').replace(/\s+/g, '_').toLowerCase();
+        link.download = `presupuesto_${clienteSlug}_${fechaStr.replace(/\//g, '-')}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+
+        showToast('Imagen guardada', 'success');
+    } catch (err) {
+        showToast('Error generando imagen: ' + err.message, 'error');
+    } finally {
+        document.body.removeChild(iframe);
+        btn.textContent = '📷 Guardar imagen';
+        btn.disabled = false;
+    }
 }
 
 async function confirmDelete(id) {
