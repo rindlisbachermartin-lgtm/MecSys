@@ -108,8 +108,7 @@ function AppShell() {
         onToggleSidebar={toggleSidebar}
       />
       <main
-        className="pt-16 min-h-screen transition-all duration-300"
-        style={{ marginLeft: sidebarOpen ? '16rem' : '0' }}
+        className={`pt-16 min-h-screen transition-all duration-300 ml-0 ${sidebarOpen ? 'md:ml-64' : ''}`}
       >
         <div className="p-6 md:p-8 max-w-7xl mx-auto">
           <PageComponent

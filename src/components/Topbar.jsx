@@ -30,14 +30,13 @@ export function Topbar({ currentPage, onSearch, action, dark, onToggleTheme, sid
 
   return (
     <header
-      className="fixed top-0 right-0 h-16 z-40 bg-background/80 backdrop-blur-md flex items-center justify-between px-4 md:px-6 border-b border-outline-variant/20 transition-all duration-300"
-      style={{ left: sidebarOpen ? '16rem' : '0' }}
+      className={`fixed top-0 right-0 h-16 z-40 bg-background/80 backdrop-blur-md flex items-center justify-between px-4 md:px-6 border-b border-outline-variant/20 transition-all duration-300 left-0 ${sidebarOpen ? 'md:left-64' : ''}`}
     >
-      {/* Botón hamburguesa — siempre visible */}
+      {/* Botón hamburguesa */}
       <button
         onClick={onToggleSidebar}
         title={sidebarOpen ? 'Cerrar menú' : 'Abrir menú'}
-        className="w-9 h-9 flex items-center justify-center rounded-xl text-outline hover:text-primary hover:bg-surface-container transition-colors shrink-0"
+        className={`w-9 h-9 items-center justify-center rounded-xl text-outline hover:text-primary hover:bg-surface-container transition-colors shrink-0 ${sidebarOpen ? 'hidden md:flex' : 'flex'}`}
       >
         <span className="material-symbols-outlined text-[22px]">
           {sidebarOpen ? 'menu_open' : 'menu'}
@@ -45,7 +44,7 @@ export function Topbar({ currentPage, onSearch, action, dark, onToggleTheme, sid
       </button>
 
       {/* Logo centrado — solo mobile */}
-      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 md:hidden">
+      <div className={`absolute left-1/2 -translate-x-1/2 items-center gap-2 md:hidden ${sidebarOpen ? 'hidden' : 'flex'}`}>
         <div className="w-7 h-7 bg-primary/20 flex items-center justify-center rounded-lg border border-primary/30 shrink-0">
           <span className="material-symbols-outlined text-primary text-[16px]">engineering</span>
         </div>
@@ -68,12 +67,12 @@ export function Topbar({ currentPage, onSearch, action, dark, onToggleTheme, sid
         </div>
       </div>
 
-      <div className="flex items-center gap-3 ml-4">
+      <div className={`items-center gap-3 ml-4 ${sidebarOpen ? 'hidden md:flex' : 'flex'}`}>
         {/* Theme toggle */}
         <button
           onClick={handleThemeToggle}
           title={dark ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'}
-          className={`w-9 h-9 items-center justify-center rounded-xl text-outline hover:text-primary hover:bg-surface-container transition-colors ${sidebarOpen ? 'hidden md:flex' : 'flex'}`}
+          className={`w-9 h-9 flex items-center justify-center rounded-xl text-outline hover:text-primary hover:bg-surface-container transition-colors`}
         >
           <span
             className="material-symbols-outlined text-[20px]"
